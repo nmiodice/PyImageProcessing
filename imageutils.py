@@ -1,10 +1,12 @@
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
+from scipy.spatial import Delaunay
 from scipy import ndimage
 from scipy import misc
 import numpy as np
+import random
 
-class ImageML:
+class ImTools:
 
 	def __init__(self, fp):
 		self.mImg = self.read_image(fp)
@@ -32,7 +34,7 @@ class ImageML:
 	# takes an M x N x P image and returns an (M * N) x P array, where element
     # (i, j), contains the value of the j'th color channel in the i'th pixel.
     # Pixels are re-arranged in row-major order
-	def get_rgb_features(self, rgb_scale):
+	def get_rgb_features(self, rgb_scale = 1):
 		shape = self.mImg.shape
 		total_px = shape[0] * shape[1]
 		features = self.mImg.reshape(1, total_px, shape[2])
@@ -48,12 +50,12 @@ class ImageML:
     # (i, 0), contains the x location of the i'th pixel and element (i, 1)
     # contains the y location of the i'th pixel. Pixels are re-arranged in row-
 	# major order. XY_SCALE is used to scale each feature value
-	def get_xy_features(self, xy_scale):
+	def get_xy_features(self, xy_scale = 1):
 		shape = self.mImg.shape
 		total_px = shape[0] * shape[1]
 
-		x_coords = np.arange(shape[0])
-		y_coords = np.arange(shape[1])
+		x_coords = np.arange(shape[1])
+		y_coords = np.arange(shape[0])
 
 		features = np.meshgrid(x_coords, y_coords)
 		features[0].resize(1, total_px)
@@ -67,14 +69,12 @@ class ImageML:
 		for i in range(0, 2):
 			features[i] = features[i].astype(float)
 			features[i] *= xy_scale
-			# features[i] *= float(255)/features[i].max()
-			# features[i] += 1
 
 		return np.transpose(features)
 
 	# takes an M x N x P image and returns an (M * N) x (P + 2) array
 	# containing RGB features concatenated with XY features
-	def get_rgb_xy_features(self, rgb_scale, xy_scale):
+	def get_rgb_xy_features(self, rgb_scale = 1, xy_scale = 1):
 		rgb_features = self.get_rgb_features(rgb_scale)
 		xy_features = self.get_xy_features(xy_scale)
 		features = np.concatenate((rgb_features, xy_features), axis = 1)
@@ -102,5 +102,68 @@ class ImageML:
 				cluster_map[labels == clus, col] = np.mean(cluster_map[labels == clus, col])
 
 		return cluster_map
+
+	# returns an array of corner points
+	def get_corner_points(self):
+		shape = self.mImg.shape
+		coords = []
+		coords.append([0, 0])
+		coords.append([shape[1] - 1, shape[0] - 1])
+		coords.append([shape[1] - 1, 0])
+		coords.append([0, shape[0] - 1])
+		return coords
+
+	# returns coordinates which are relatively evenly spaced across the image,
+	# perturbed by Gaussian noise. Optionally, if INCLUDE_CORNERS is True, then
+	# corner points are added as well
+	def get_distributed_points(self, spacing, sigma, include_corners = False):
+		shape = self.mImg.shape
+		n_x = int(shape[1] / spacing)
+		n_y = int(shape[0] / spacing)
+
+		coords = []
+		if include_corners == True:
+			coords = self.get_corner_points()
+
+		# generates evenly spaced points, perturbed by Gaussian noise
+		for x in range(n_x):
+			mu_x = spacing * (x + 1)
+			for y in range(n_y):
+				mu_y = spacing * (y + 1)
+				# clamp generated points to image boundary
+				x_pt = min(int(random.gauss(mu_x, sigma)), shape[1])
+				x_pt = max(0, x_pt)
+				y_pt = min(int(random.gauss(mu_y, sigma)), shape[0])
+				y_pt = max(0, y_pt)
+				coords.append([x_pt, y_pt])
+		return coords
+	
+	# creates a triangulation reduction of an image. SIZE is a parameter which
+	# indicates the number of vertex points on the longest dimension
+	def triangulate(self, size):
+		shape = self.mImg.shape
+		spacing = max(shape) / size
+		sigma = spacing / 4
+		coords = self.get_distributed_points(spacing, sigma, include_corners = True)
+		
+		tri = Delaunay(coords)
+		im_pts = self.get_xy_features()
+		# pt_tri_membership becomes a map which is the same size as the
+		# original image (first two dimensions only). each element contains
+		# the triangle membership of that point in the source image
+		pt_tri_membership = tri.find_simplex(im_pts.astype(dtype = np.double))
+		pt_tri_membership.resize(shape[0], shape[1])
+		num_tri = np.max(pt_tri_membership)
+
+		tri_map = np.copy(self.mImg) 
+		# replace elements of each triangle with the mean value of the color
+		# channels from the original image
+		for tri in range(num_tri + 1):
+			this_tri = pt_tri_membership == tri
+			if np.any(this_tri) == False:
+				continue
+			for col in range(shape[2]):
+				tri_map[this_tri, col] = np.mean(tri_map[this_tri, col])
+		return tri_map
 
 
