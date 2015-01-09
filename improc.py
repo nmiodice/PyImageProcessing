@@ -18,10 +18,10 @@ if __name__ == '__main__':
         action = 'store_true')
     parser.add_argument('-o', '--output',
         help = 'Output transformed image to a file')
-    parser.add_argument('-so', '--stdout',
+    parser.add_argument('-std', '--stdout',
         help = 'Output transformed image to standard out using a specified format (jpg, png, etc...)')
 
-    if not len(sys.argv) > 1:
+    if len(sys.argv) == 1:
         parser.print_help()
         sys.exit()
 

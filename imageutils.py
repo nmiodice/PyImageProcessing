@@ -36,9 +36,10 @@ class ImTools:
 	def write_image_stdout(self, format, img):
 		tmp_file_name = 'zz_improc_tmp_img.' + format
 		self.write_image(tmp_file_name, img)
-		with open(tmp_file_name, 'rb') as fin:
-			s = fin.read()
-			sys.stdout.buffer.write(s)
+		with open(tmp_file_name, 'rb') as f:
+			bytes = f.read()
+			sys.stdout.buffer.write(bytes)
+			f.close()
 		os.remove(tmp_file_name)
 
 	# displays an arbitrary image in a new figure with no axis information. If no
@@ -141,7 +142,7 @@ class ImTools:
 		n_y = int(shape[0] / spacing)
 
 		coords = []
-		if include_corners == True:
+		if include_corners:
 			coords = self.get_corner_points()
 
 		# generates evenly spaced points, perturbed by Gaussian noise
@@ -179,7 +180,7 @@ class ImTools:
 		# channels from the original image
 		for tri in range(num_tri + 1):
 			this_tri = pt_tri_membership == tri
-			if np.any(this_tri) is False:
+			if not np.any(this_tri):
 				continue
 			for col in range(shape[2]):
 				tri_map[this_tri, col] = np.mean(tri_map[this_tri, col])
