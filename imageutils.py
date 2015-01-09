@@ -5,11 +5,14 @@ from scipy import ndimage
 from scipy import misc
 import numpy as np
 import random
+import sys
+import os
 
 class ImTools:
 
 	def __init__(self, fp):
 		self.mImg = self.read_image(fp)
+		assert(self.mImg is not None)
 
 	# returns an NDIMAGE of FP, or NONE if the file cannot be found
 	def read_image(self, fp):
@@ -19,15 +22,31 @@ class ImTools:
 			return None
 		return self.mImg
 
-	# displays self.MIMG image in a new figure with no axis information
-	def show(self):
-		plt.imshow(self.mImg, cmap=plt.cm.gray)
-		plt.axis('off')
-		plt.show()
+	# writes an IMG, an NDIMAGE, to the file path specified by FP. file extension
+	# is determined by the extension in FP and can be any other supported by
+	# SCIPY.MISC.IMWRITE
+	def write_image(self, fp, img):
+		try:
+			self.mImg = misc.imsave(fp, img)
+		except:
+			print('error saving image to file')
 
-	# displays an arbitrary image in a new figure with no axis information
-	def show(self, img):
-		plt.imshow(img, cmap=plt.cm.gray)
+	# prints IMG to STDOUT in the format specified by FORMAT. FORMAT can be 'jpg',
+	# 'png', or any other extension supported by SCIPY.MISC.IMWRITE
+	def write_image_stdout(self, format, img):
+		tmp_file_name = 'zz_improc_tmp_img.' + format
+		self.write_image(tmp_file_name, img)
+		with open(tmp_file_name, 'rb') as fin:
+			s = fin.read()
+			sys.stdout.buffer.write(s)
+		os.remove(tmp_file_name)
+
+	# displays an arbitrary image in a new figure with no axis information. If no
+	# image is supplied, SELF.MIMG is shown
+	def show(self, img = None):
+		if img is None:
+			img = self.mImg
+		plt.imshow(img, cmap = plt.cm.gray)
 		plt.axis('off')
 		plt.show()
 
@@ -126,9 +145,9 @@ class ImTools:
 			coords = self.get_corner_points()
 
 		# generates evenly spaced points, perturbed by Gaussian noise
-		for x in range(n_x):
+		for x in range(-1, n_x + 1):
 			mu_x = spacing * (x + 1)
-			for y in range(n_y):
+			for y in range(-1, n_y + 1):
 				mu_y = spacing * (y + 1)
 				# clamp generated points to image boundary
 				x_pt = min(int(random.gauss(mu_x, sigma)), shape[1])
@@ -139,7 +158,7 @@ class ImTools:
 		return coords
 	
 	# creates a triangulation reduction of an image. SIZE is a parameter which
-	# indicates the number of vertex points on the longest dimension
+	# indicates the (approx) number of vertex points on the longest dimension
 	def triangulate(self, size):
 		shape = self.mImg.shape
 		spacing = max(shape) / size
@@ -160,7 +179,7 @@ class ImTools:
 		# channels from the original image
 		for tri in range(num_tri + 1):
 			this_tri = pt_tri_membership == tri
-			if np.any(this_tri) == False:
+			if np.any(this_tri) is False:
 				continue
 			for col in range(shape[2]):
 				tri_map[this_tri, col] = np.mean(tri_map[this_tri, col])
