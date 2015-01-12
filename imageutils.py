@@ -226,8 +226,18 @@ class ImTools:
 	# returns a list of pixels to be removed. in the returned list, L, L[I] = J
 	# if pixel J is in the lowest cost energy path from row I. it is assumed
 	# that the path is a vertical slice of the image
-	def _get_lowest_cost_path(self, grad, energy_map):
-		low_energy_px = np.argmin(energy_map[-1, :])
+	def _get_lowest_cost_path(self, grad, energy_map, exact = True):
+		last_row = energy_map[-1, :]
+		if exact:
+			candidates = np.where(last_row == last_row.min())[0]
+		else:
+			min_val = last_row.min()
+			std = last_row.std()
+			thresh = min_val + std/float(16)
+			candidates = np.where(last_row <= thresh)[0]
+
+		low_energy_px = random.choice(candidates)
+		print(low_energy_px)
 		seam = [low_energy_px]
 		n_rows = grad.shape[0]
 		n_cols = grad.shape[1]
@@ -285,7 +295,7 @@ class ImTools:
 			grad = np.gradient(im_gray)
 			grad = np.sqrt(grad[0] ** 2 + grad[1] ** 2)
 			energy_map = self._get_energy_map(grad)
-			seam = self._get_lowest_cost_path(grad, energy_map)
+			seam = self._get_lowest_cost_path(grad, energy_map, exact = False)
 			im_col = self._delete_seam(im_col, seam)
 		
 		# see comments at beginning of function

@@ -59,7 +59,10 @@ if __name__ == '__main__':
         new_im = imtool.smart_resize('x', args.width)
     
     if args.height is not None:
+        old_im = imtool.mImg
+        imtool.mImg = new_im
         new_im = imtool.smart_resize('y', args.height)
+        imtool.mImg = old_im
 
     if args.show is True:
         imtool.show(new_im)
