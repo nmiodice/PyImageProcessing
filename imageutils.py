@@ -124,7 +124,7 @@ class ImTools:
 		return cluster_map
 
 	# returns an array of corner points
-	def get_corner_points(self):
+	def _get_corner_points(self):
 		shape = self.mImg.shape
 		coords = []
 		coords.append([0, 0])
@@ -136,14 +136,14 @@ class ImTools:
 	# returns coordinates which are relatively evenly spaced across the image,
 	# perturbed by Gaussian noise. Optionally, if INCLUDE_CORNERS is True, then
 	# corner points are added as well
-	def get_distributed_points(self, spacing, sigma, include_corners = False):
+	def _get_distributed_points(self, spacing, sigma, include_corners = False):
 		shape = self.mImg.shape
 		n_x = int(shape[1] / spacing)
 		n_y = int(shape[0] / spacing)
 
 		coords = []
 		if include_corners:
-			coords = self.get_corner_points()
+			coords = self._get_corner_points()
 
 		# generates evenly spaced points, perturbed by Gaussian noise
 		for x in range(-1, n_x + 1):
@@ -164,13 +164,13 @@ class ImTools:
 		shape = self.mImg.shape
 		spacing = max(shape) / size
 		sigma = spacing / 4
-		coords = self.get_distributed_points(spacing, sigma, include_corners = True)
+		coords = self._get_distributed_points(spacing, sigma, include_corners = True)
 		
 		tri = Delaunay(coords)
 		im_pts = self.get_xy_features()
 		# pt_tri_membership becomes a map which is the same size as the
 		# original image (first two dimensions only). each element contains
-		# the triangle membership of that point in the source image
+		# the triangle ID of that point in the source image
 		pt_tri_membership = tri.find_simplex(im_pts.astype(dtype = np.double))
 		pt_tri_membership.resize(shape[0], shape[1])
 		num_tri = np.max(pt_tri_membership)
@@ -183,7 +183,115 @@ class ImTools:
 			if not np.any(this_tri):
 				continue
 			for col in range(shape[2]):
-				tri_map[this_tri, col] = np.mean(tri_map[this_tri, col])
+				tri_map[this_tri, col] = np.mean(self.mImg[this_tri, col])
 		return tri_map
+
+	# converts an RGB image, IM, to gray-scale using the formula for luminosity:
+	#	L = 0.21 * R + 0.72 * G + 0.07 * B
+	def rgb2gray(self, im = None):
+		if im is None:
+			im = self.mImg
+		return im[:, :, 0] * 0.21 + im[:, :, 1] * 0.72 + im[:, :, 2] * 0.07
+
+	# returns an M x N energy map of the an M x N gradient map GRAD. The energy 
+	# map is is aggregated from the top to bottom of the first dimension of
+	# GRAD. The general algorithm is described here: 
+	# 	http://en.wikipedia.org/wiki/Seam_carving
+	def _get_energy_map(self, grad):
+		energy_map = np.zeros(grad.shape)
+		energy_map[0, :] = grad[0, :]
+		
+		# for each pixel in each row of the gradient map, we can find its
+		# corresponding minimum energy value by summing that pixels gradient 
+		# value with the minimum of the cumulative energy values from 
+		# neighboring pixels in the preceding row.
+		n_rows = grad.shape[0]
+		for row in range(1, n_rows):
+			row_orig = energy_map[row - 1, :]
+			row_shift_r = np.roll(row_orig, 1)[1:-1]
+			row_shift_l = np.roll(row_orig, -1)[1:-1]
+			row_orig = row_orig[1:-1]
+			# note: np.minimum can only compare 2 arrays at a time!
+			min_energy_vals = np.minimum(row_shift_r, row_shift_l)
+			min_energy_vals = np.minimum(min_energy_vals, row_orig)
+			energy_map[row, 1:-1] = grad[row, 1:-1] + min_energy_vals
+
+			# edge pixels cannot be vectorized like the other pixels because
+			# they only look 2, not 3, pixels from the row above
+			energy_map[row, 0] = grad[row, 0] + min(energy_map[row - 1, 0], energy_map[row - 1, 1])
+			energy_map[row, -1] = grad[row, -1] + min(energy_map[row - 1, -1], energy_map[row - 1, -2])
+		return energy_map
+	
+	# reconstructs the lowest cost energy path using GRAD and ENERGY_MAP and
+	# returns a list of pixels to be removed. in the returned list, L, L[I] = J
+	# if pixel J is in the lowest cost energy path from row I. it is assumed
+	# that the path is a vertical slice of the image
+	def _get_lowest_cost_path(self, grad, energy_map):
+		low_energy_px = np.argmin(energy_map[-1, :])
+		seam = [low_energy_px]
+		n_rows = grad.shape[0]
+		n_cols = grad.shape[1]
+
+		# build the list of pixels in reverse order, using dynamic programming
+		for row in reversed(range(n_rows - 1)):
+			last_px = seam[-1]
+			last_enegery_val = energy_map[row + 1, last_px]
+			last_grad_val = grad[row + 1, last_px]
+
+			# prevents out of bounds condition when checking near edge pixels
+			left_idx = min(n_cols - 1, last_px + 1)
+			right_idx = max(0, last_px - 1)
+
+			if last_grad_val + energy_map[row, last_px] == last_enegery_val:
+				seam.append(last_px)
+			elif last_grad_val + energy_map[row, left_idx] == last_enegery_val:
+				seam.append(left_idx)
+			elif last_grad_val + energy_map[row, right_idx] == last_enegery_val:
+				seam.append(right_idx)
+			else:
+				# this should absolutely never happen, and indicates an 
+				# algorithmic error
+				assert(True is False)
+		return list(reversed(seam))
+
+	# deletes a vertical seam from IM using a list, SEAM, where each element of
+	# SEAM[I] = J if pixel J should be removed from seam I
+	def _delete_seam(self, im, seam):
+		h, w, d = im.shape
+		new_im = np.zeros((h, w - 1, d))
+
+		for dim in range(d):
+   			for row in range(h):
+   				rem_px = seam[row]
+   				new_im[row, :, dim] = np.append(im[row, 0:rem_px, dim], im[row, (rem_px + 1):, dim])
+		return new_im
+
+	def smart_resize(self, axis, n_px):
+		im_col = np.copy(self.mImg)
+		# the algorithm is designed to work only in the x direction, so a simple
+		# transpose will allow us to work around this
+		if axis.lower() == 'y':
+			im_col = np.transpose(im_col, (1, 0, 2))
+		elif axis.lower() != 'x':
+			raise ValueError('Axis parameter must be either "x" or "y"')
+		
+		# the general algorithm is to generate a gradient map, then use a
+		# dynamic programming approach to find low energy seams in the gradient
+		# map. these seems are candidates for removal
+		while n_px is not 0:
+			n_px -= 1
+			im_gray = self.rgb2gray(im_col)
+			
+			grad = np.gradient(im_gray)
+			grad = np.sqrt(grad[0] ** 2 + grad[1] ** 2)
+			energy_map = self._get_energy_map(grad)
+			seam = self._get_lowest_cost_path(grad, energy_map)
+			im_col = self._delete_seam(im_col, seam)
+		
+		# see comments at beginning of function
+		if axis.lower() == 'y':
+			im_col = np.transpose(im_col, (1, 0, 2))
+		return im_col
+		
 
 
