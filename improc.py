@@ -56,13 +56,12 @@ if __name__ == '__main__':
         new_im = imtool.triangulate(args.triangulate)
 
     if args.width is not None:
-        new_im = imtool.smart_resize('x', args.width)
+        new_im = imtool.seam_carve('x', args.width)
     
     if args.height is not None:
-        old_im = imtool.mImg
-        imtool.mImg = new_im
-        new_im = imtool.smart_resize('y', args.height)
-        imtool.mImg = old_im
+        imtool2 = ImTools(None)
+        imtool2.mImg = new_im
+        new_im = imtool2.seam_carve('y', args.height)
 
     if args.show is True:
         imtool.show(new_im)

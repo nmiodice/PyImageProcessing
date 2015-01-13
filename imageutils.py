@@ -10,9 +10,10 @@ import os
 
 class ImTools:
 
-	def __init__(self, fp):
-		self.mImg = self.read_image(fp)
-		assert(self.mImg is not None)
+	def __init__(self, fp = None):
+		if fp is not None:
+			self.mImg = self.read_image(fp)
+			assert(self.mImg is not None)
 
 	# returns an NDIMAGE of FP, or NONE if the file cannot be found
 	def read_image(self, fp):
@@ -225,9 +226,12 @@ class ImTools:
 	# reconstructs the lowest cost energy path using GRAD and ENERGY_MAP and
 	# returns a list of pixels to be removed. in the returned list, L, L[I] = J
 	# if pixel J is in the lowest cost energy path from row I. it is assumed
-	# that the path is a vertical slice of the image
+	# that the path is a vertical slice of the image. if EXACT is False, then
+	# seams with relatively low energy are allowed to be chosen even if they
+	# are not a minimum
 	def _get_lowest_cost_path(self, grad, energy_map, exact = True):
 		last_row = energy_map[-1, :]
+		# perturb threshold to allow near-minimum values
 		if exact:
 			candidates = np.where(last_row == last_row.min())[0]
 		else:
@@ -237,7 +241,6 @@ class ImTools:
 			candidates = np.where(last_row <= thresh)[0]
 
 		low_energy_px = random.choice(candidates)
-		print(low_energy_px)
 		seam = [low_energy_px]
 		n_rows = grad.shape[0]
 		n_cols = grad.shape[1]
@@ -264,20 +267,36 @@ class ImTools:
 				assert(True is False)
 		return list(reversed(seam))
 
-	# deletes a vertical seam from IM using a list, SEAM, where each element of
-	# SEAM[I] = J if pixel J should be removed from seam I
-	def _delete_seam(self, im, seam):
+	# deletes or adds a vertical seam from IM using a list, SEAM, where each
+	# element of SEAM[I] = J if pixel J should be removed from seam I. An
+	# updated version of IM is returned
+	def _seam_util(self, im, seam, delete):
 		h, w, d = im.shape
-		new_im = np.zeros((h, w - 1, d))
+		if delete:
+			new_im = np.zeros((h, w - 1, d))
+		else:
+			new_im = np.zeros((h, w + 1, d))
 
 		for dim in range(d):
    			for row in range(h):
-   				rem_px = seam[row]
-   				new_im[row, :, dim] = np.append(im[row, 0:rem_px, dim], im[row, (rem_px + 1):, dim])
+   				target_px = seam[row]
+   				if delete:
+   					new_im[row, :, dim] = np.append(im[row, 0:target_px, dim], im[row, (target_px + 1):, dim])
+   				else:
+   					new_im[row, :, dim] = np.append(im[row, 0:(target_px + 1), dim], im[row, target_px:, dim])
 		return new_im
 
-	def smart_resize(self, axis, n_px):
+	# resizes the image along an AXIS by N_PX using content-aware seam carving,
+	# as described here:
+	# 	http://en.wikipedia.org/wiki/Seam_carving
+	def seam_carve(self, axis, n_px):
 		im_col = np.copy(self.mImg)
+		if n_px < 0:
+			del_seam = True
+		else:
+			del_seam = False
+		to_avoid = np.array([])
+
 		# the algorithm is designed to work only in the x direction, so a simple
 		# transpose will allow us to work around this
 		if axis.lower() == 'y':
@@ -289,19 +308,23 @@ class ImTools:
 		# dynamic programming approach to find low energy seams in the gradient
 		# map. these seems are candidates for removal
 		while n_px is not 0:
-			n_px -= 1
+			if n_px > 0:
+				n_px -= 1
+			else:
+				n_px += 1
+
 			im_gray = self.rgb2gray(im_col)
-			
 			grad = np.gradient(im_gray)
 			grad = np.sqrt(grad[0] ** 2 + grad[1] ** 2)
 			energy_map = self._get_energy_map(grad)
 			seam = self._get_lowest_cost_path(grad, energy_map, exact = False)
-			im_col = self._delete_seam(im_col, seam)
-		
+			im_col = self._seam_util(im_col, seam, del_seam)
+
 		# see comments at beginning of function
 		if axis.lower() == 'y':
 			im_col = np.transpose(im_col, (1, 0, 2))
-		return im_col
+		print(im_col.max())
+		return im_col.astype(int)
 		
 
 
