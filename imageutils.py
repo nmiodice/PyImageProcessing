@@ -223,12 +223,13 @@ class ImTools:
 			energy_map[row, -1] = grad[row, -1] + min(energy_map[row - 1, -1], energy_map[row - 1, -2])
 		return energy_map
 	
-	# reconstructs the lowest cost energy path using GRAD and ENERGY_MAP and
-	# returns a list of pixels to be removed. in the returned list, L, L[I] = J
-	# if pixel J is in the lowest cost energy path from row I. it is assumed
-	# that the path is a vertical slice of the image. if EXACT is False, then
-	# seams with relatively low energy are allowed to be chosen even if they
-	# are not a minimum
+	# reconstructs the lowest cost energy paths using GRAD and ENERGY_MAP and
+	# returns a list of pixels to be removed. in the returned list, L,
+	# L[M][I] = J if pixel J is in the lowest cost energy path from row I. it
+	# is assumed that the path is a vertical slice of the image. if EXACT is
+	# False, then seams with relatively low energy are allowed to be chosen
+	# even if they are not a minimum. M is the seam index. N_SEAMS is the max
+	# number of seams returned
 	def _get_lowest_cost_paths(self, grad, energy_map, exact = True, n_seams = 1):
 		last_row = np.copy(energy_map[-1, :])
 		chosen_map = np.zeros(energy_map.shape, dtype = bool)
@@ -237,17 +238,33 @@ class ImTools:
 		n_rows = grad.shape[0]
 		n_cols = grad.shape[1]
 
+		# the general algorithm is as follows:
+		#	While there are still seams to find AND there are minimum cost 
+		# 	seams that are unique:
+		#		Find a (near, if EXACT == TRUE) minimum cost seam and add it to
+		# 		the list of seams, marking visited pixels in CHOSEN_MAP. New
+		# 		seams must not share any pixels with other seams until doing so
+		# 		would prevent a seam from being found
 		while n_seams > 0:
 			seam_found = False
 			n_seams -= 1
 
+			# try low cost seams until a unique one is found
 			while not seam_found:
-				###### DEBUG STATEMENT!!!!
+				# this is true when every pixel in the last row is tested for
+				# candidacy as a unique low cost seam, so we can effectively
+				# reset our constraints
 				if len(chosen_px) == n_cols:
-					return seam_list
-				######
-				
-				candidates = np.where(last_row == last_row.min())[0].tolist()
+					chosen_map = np.zeros(energy_map.shape, dtype = bool)
+					chosen_px = []
+
+				# choose a candidate at random from all potential start pixels
+				if exact:
+					candidates = np.where(last_row == last_row.min())[0].tolist()
+				else:
+					thresh = last_row.min() + last_row.std()
+					candidates = np.where(last_row <= thresh)[0].tolist()
+
 				candidates = [x for x in candidates if x not in chosen_px]
 				low_energy_px = random.choice(candidates)
 				# avoids this pixel from being chosen again
@@ -294,25 +311,28 @@ class ImTools:
 	# updated version of IM is returned
 	def _seam_util(self, im, seam_list, delete):
 		seam_matrix = np.array(seam_list)
-
+		n_seams = len(seam_list)
 		h, w, d = im.shape
 		if delete:
-			new_w = w - len(seam_list)
+			new_w = w - n_seams
 		else:
-			new_w = w + len(seam_list)
+			new_w = w + n_seams
 		new_im = np.zeros((h, new_w, d))	
 		
+		# delete or insert using broadcasting
 		for row in range(h):
 			idxs = seam_matrix[:, row]
+			imslice = im[row, :, :]
 			if delete:
-				new_im[row, :, :] = np.delete(im[row, :, :], idxs, axis = 0)
+				new_im[row, :, :] = np.delete(imslice, idxs, axis = 0)
 			else:
-				new_im[row, :, :] = np.insert(im[row, :, :], idxs, im[row, :, :][idxs], axis = 0)
+				new_im[row, :, :] = np.insert(imslice, idxs, imslice[idxs], axis = 0)
 		return new_im
 
 	# resizes the image along an AXIS by N_PX using content-aware seam carving,
 	# as described here:
 	# 	http://en.wikipedia.org/wiki/Seam_carving
+	# if N_PX < 0, the image is shrunk, otherwise, it is enlarged
 	def seam_carve(self, axis, n_px):
 		im_col = np.copy(self.mImg)
 		if n_px < 0:
