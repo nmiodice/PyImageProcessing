@@ -229,61 +229,85 @@ class ImTools:
 	# that the path is a vertical slice of the image. if EXACT is False, then
 	# seams with relatively low energy are allowed to be chosen even if they
 	# are not a minimum
-	def _get_lowest_cost_path(self, grad, energy_map, exact = True):
-		last_row = energy_map[-1, :]
-		# perturb threshold to allow near-minimum values
-		if exact:
-			candidates = np.where(last_row == last_row.min())[0]
-		else:
-			min_val = last_row.min()
-			std = last_row.std()
-			thresh = min_val + std/float(16)
-			candidates = np.where(last_row <= thresh)[0]
-
-		low_energy_px = random.choice(candidates)
-		seam = [low_energy_px]
+	def _get_lowest_cost_paths(self, grad, energy_map, exact = True, n_seams = 1):
+		last_row = np.copy(energy_map[-1, :])
+		chosen_map = np.zeros(energy_map.shape, dtype = bool)
+		chosen_px = []
+		seam_list = []
 		n_rows = grad.shape[0]
 		n_cols = grad.shape[1]
 
-		# build the list of pixels in reverse order, using dynamic programming
-		for row in reversed(range(n_rows - 1)):
-			last_px = seam[-1]
-			last_enegery_val = energy_map[row + 1, last_px]
-			last_grad_val = grad[row + 1, last_px]
+		while n_seams > 0:
+			seam_found = False
+			n_seams -= 1
 
-			# prevents out of bounds condition when checking near edge pixels
-			left_idx = min(n_cols - 1, last_px + 1)
-			right_idx = max(0, last_px - 1)
+			while not seam_found:
+				###### DEBUG STATEMENT!!!!
+				if len(chosen_px) == n_cols:
+					return seam_list
+				######
+				
+				candidates = np.where(last_row == last_row.min())[0].tolist()
+				candidates = [x for x in candidates if x not in chosen_px]
+				low_energy_px = random.choice(candidates)
+				# avoids this pixel from being chosen again
+				last_row[low_energy_px] = max(last_row)
+				chosen_px.append(low_energy_px)
 
-			if last_grad_val + energy_map[row, last_px] == last_enegery_val:
-				seam.append(last_px)
-			elif last_grad_val + energy_map[row, left_idx] == last_enegery_val:
-				seam.append(left_idx)
-			elif last_grad_val + energy_map[row, right_idx] == last_enegery_val:
-				seam.append(right_idx)
-			else:
-				# this should absolutely never happen, and indicates an 
-				# algorithmic error
-				assert(True is False)
-		return list(reversed(seam))
+				# start building the seam
+				seam = [low_energy_px]
+
+				# build the list of pixels in reverse order, using dynamic programming
+				for row in reversed(range(n_rows - 1)):
+					last_px = seam[-1]
+					last_enegery_val = energy_map[row + 1, last_px]
+					last_grad_val = grad[row + 1, last_px]
+
+					# prevents out of bounds condition when checking near edge pixels
+					left_idx = min(n_cols - 1, last_px + 1)
+					right_idx = max(0, last_px - 1)
+
+					if last_grad_val + energy_map[row, last_px] == last_enegery_val:
+						target = last_px
+					elif last_grad_val + energy_map[row, left_idx] == last_enegery_val:
+						target = left_idx
+					elif last_grad_val + energy_map[row, right_idx] == last_enegery_val:
+						target = right_idx
+					else:
+						# this should absolutely never happen, and indicates an 
+						# algorithmic error
+						assert(True is False)
+
+					# avoids repeated paths
+					if chosen_map[row, target] == True:
+						break
+					seam.append(target)
+					chosen_map[row, target] = True
+
+				if n_rows == len(seam):
+					seam_found = True
+					seam_list.append(list(reversed(seam)))
+		return seam_list
 
 	# deletes or adds a vertical seam from IM using a list, SEAM, where each
 	# element of SEAM[I] = J if pixel J should be removed from seam I. An
 	# updated version of IM is returned
-	def _seam_util(self, im, seam, delete):
+	def _seam_util(self, im, seam_list, delete):
+		seam_matrix = np.array(seam_list)
+
 		h, w, d = im.shape
 		if delete:
-			new_im = np.zeros((h, w - 1, d))
+			new_w = w - len(seam_list)
 		else:
-			new_im = np.zeros((h, w + 1, d))
-
-		for dim in range(d):
-   			for row in range(h):
-   				target_px = seam[row]
-   				if delete:
-   					new_im[row, :, dim] = np.append(im[row, 0:target_px, dim], im[row, (target_px + 1):, dim])
-   				else:
-   					new_im[row, :, dim] = np.append(im[row, 0:(target_px + 1), dim], im[row, target_px:, dim])
+			new_w = w + len(seam_list)
+		new_im = np.zeros((h, new_w, d))	
+		
+		for row in range(h):
+			idxs = seam_matrix[:, row]
+			if delete:
+				new_im[row, :, :] = np.delete(im[row, :, :], idxs, axis = 0)
+			else:
+				new_im[row, :, :] = np.insert(im[row, :, :], idxs, im[row, :, :][idxs], axis = 0)
 		return new_im
 
 	# resizes the image along an AXIS by N_PX using content-aware seam carving,
@@ -308,22 +332,22 @@ class ImTools:
 		# dynamic programming approach to find low energy seams in the gradient
 		# map. these seems are candidates for removal
 		while n_px is not 0:
-			if n_px > 0:
-				n_px -= 1
-			else:
-				n_px += 1
-
 			im_gray = self.rgb2gray(im_col)
 			grad = np.gradient(im_gray)
 			grad = np.sqrt(grad[0] ** 2 + grad[1] ** 2)
 			energy_map = self._get_energy_map(grad)
-			seam = self._get_lowest_cost_path(grad, energy_map, exact = False)
-			im_col = self._seam_util(im_col, seam, del_seam)
+			seam_list = self._get_lowest_cost_paths(grad, energy_map, exact = False, n_seams = abs(n_px))
+			im_col = self._seam_util(im_col, seam_list, del_seam)
+
+			if n_px > 0:
+				n_px -= len(seam_list)
+			else:
+				n_px += len(seam_list)
+
 
 		# see comments at beginning of function
 		if axis.lower() == 'y':
 			im_col = np.transpose(im_col, (1, 0, 2))
-		print(im_col.max())
 		return im_col.astype(int)
 		
 
