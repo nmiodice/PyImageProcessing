@@ -229,10 +229,13 @@ class ImTools:
 	# is assumed that the path is a vertical slice of the image. if EXACT is
 	# False, then seams with relatively low energy are allowed to be chosen
 	# even if they are not a minimum. M is the seam index. N_SEAMS is the max
-	# number of seams returned
-	def _get_lowest_cost_paths(self, grad, energy_map, exact = True, n_seams = 1):
+	# number of seams returned. ALLOW_REPEATS controls whether or not seams can
+	# be included in the SEAM_LIST more than once
+	def _get_lowest_cost_paths(self, grad, energy_map, exact = True, n_seams = 1, allow_repeats = False):
+		UNVISITED = -1
 		last_row = np.copy(energy_map[-1, :])
-		chosen_map = np.zeros(energy_map.shape, dtype = bool)
+		chosen_map = np.empty(energy_map.shape, dtype = int)
+		chosen_map.fill(UNVISITED)
 		chosen_px = []
 		seam_list = []
 		n_rows = grad.shape[0]
@@ -255,8 +258,11 @@ class ImTools:
 				# candidacy as a unique low cost seam, so we can effectively
 				# reset our constraints
 				if len(chosen_px) == n_cols:
-					chosen_map = np.zeros(energy_map.shape, dtype = bool)
-					chosen_px = []
+					if allow_repeats:
+						chosen_map.fill(UNVISITED)
+						chosen_px = []
+					else:
+						return seam_list
 
 				# choose a candidate at random from all potential start pixels
 				if exact:
@@ -296,14 +302,23 @@ class ImTools:
 						assert(True is False)
 
 					# avoids repeated paths
-					if chosen_map[row, target] == True:
+					if chosen_map[row, target] != UNVISITED:
+						orig_start_px = chosen_map[row, target]
+						low = min(orig_start_px, low_energy_px)
+						hi = max(orig_start_px, low_energy_px)
+						for px in range(low + 1, hi):
+							if px not in chosen_px:
+								chosen_px.append(px)
+								last_row[px] = last_row.max()
 						break
+
 					seam.append(target)
-					chosen_map[row, target] = True
+					chosen_map[row, target] = low_energy_px
 
 				if n_rows == len(seam):
 					seam_found = True
 					seam_list.append(list(reversed(seam)))
+		
 		return seam_list
 
 	# deletes or adds a vertical seam from IM using a list, SEAM, where each
@@ -356,7 +371,7 @@ class ImTools:
 			grad = np.gradient(im_gray)
 			grad = np.sqrt(grad[0] ** 2 + grad[1] ** 2)
 			energy_map = self._get_energy_map(grad)
-			seam_list = self._get_lowest_cost_paths(grad, energy_map, exact = False, n_seams = abs(n_px))
+			seam_list = self._get_lowest_cost_paths(grad, energy_map, exact = False, n_seams = abs(n_px), allow_repeats = not del_seam)
 			im_col = self._seam_util(im_col, seam_list, del_seam)
 
 			if n_px > 0:
