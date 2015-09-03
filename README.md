@@ -14,6 +14,7 @@ The code isn't overly complicated, but it does do a few cool things:
 Original image:
 
 ![alt tag](http://i59.tinypic.com/azdks7.jpg)
+
 1. triangulate image with ~20 triangle vertices on the width side of the image
 
     ```$ python3 improc.py -i images/sun.jpg -t 20 -o images/tri_20.jpg```
