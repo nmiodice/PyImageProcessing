@@ -6,8 +6,11 @@ Some image processing utilities written in Python3
 
 ## Cool, but what does it do? ##
 The code isn't overly complicated, but it does do a few cool things:
+
 1. KMeans color clustering
+
 2. Triangulation
+
 3. Seam insertion/deletion, for dynamically resizing images using a smart content-aware algorithm
 
 ## Examples ##
