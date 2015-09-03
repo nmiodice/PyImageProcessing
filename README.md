@@ -11,7 +11,7 @@ The code isn't overly complicated, but it does do a few cool things:
 
 2. Triangulation
 
-3. Seam insertion/deletion, for dynamically resizing images using a smart content-aware algorithm
+3. Seam insertion/deletion, for dynamically resizing images using a smart content-aware algorithm. That is, search for 'low energy' parts of the photo, and delete those first, so the more 'interesting' parts of the image remain untouched
 
 ## Examples ##
 Original image:
