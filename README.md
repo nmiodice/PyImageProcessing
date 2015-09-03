@@ -30,10 +30,10 @@ Original image:
     ```$ python3 improc.py -i images/sun.jpg -wi 50 -o images/wi_50.jpg```
 ![alt tag](http://i61.tinypic.com/24o3h1z.jpg)
     
-4. intelligently decrease the width by 50 px
+4. intelligently decrease the width by 100 px
 
-    ```$ python3 improc.py -i images/sun.jpg -wi -50 -o images/wi_minus_50.jpg```
-![alt tag](http://i59.tinypic.com/20r32bm.jpg)
+    ```$ python3 improc.py -i images/sun.jpg -wi -100 -o images/wi_minus_100.jpg```
+![alt tag](http://i61.tinypic.com/64e3dc.jpg)
 
 # Usage
 See the examples above, or print help:
